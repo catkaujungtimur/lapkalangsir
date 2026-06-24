@@ -8,6 +8,7 @@ const SHIFTS = [
   { id:"pagi",  label:"LAPKA Pagi",  judulShift:"LANGSIR PAGI",  jamMulai:"06:00", jamSelesai:"14:00", panelId:"panelPagi"  },
 ];
 const TAB_PEGAWAI = { id:"pegawai", label:"Input Pegawai", panelId:"panelPegawai" };
+const ALL_TABS = [ TAB_PEGAWAI, ...SHIFTS ]; // Pegawai di paling kiri
 
 const LS_KEY = "lapka_langsir_state_v1";
 const ROLE_LABELS = { MAS:"MAS", KDR:"KDR", ASMAS:"ASMAS" };
@@ -145,7 +146,7 @@ function toast(msg, type){
 --------------------------------------------------------------------- */
 function renderTabBar(){
   const bar = document.getElementById("tabBar");
-  const all = [...SHIFTS, TAB_PEGAWAI];
+  const all = ALL_TABS;
   bar.innerHTML = all.map(t=>{
     const isPegawai = t.id === "pegawai";
     const cls = ["tab-btn"];
@@ -162,7 +163,7 @@ function renderTabBar(){
   });
 }
 function updatePanelVisibility(){
-  const all = [...SHIFTS, TAB_PEGAWAI];
+  const all = ALL_TABS;
   all.forEach(t=>{
     const panel = document.getElementById(t.panelId);
     if(!panel) return;
@@ -170,6 +171,7 @@ function updatePanelVisibility(){
   });
   const sh = SHIFTS.find(s=>s.id===activeTab);
   if(sh) renderShiftPanel(sh.id);
+  if(activeTab === "pegawai") pegawaiInitOnce();
 }
 
 /* ======================================================================
@@ -1074,6 +1076,572 @@ function updateDateDisplay(shiftId){
   if(el) el.textContent = formatTglDDMMYYYY(state.tanggal);
   const bt = document.getElementById(`bulanTahun-${shiftId}`);
   if(bt) bt.textContent = formatBulanTahun(state.tanggal);
+}
+
+/* ======================================================================
+   TAB: INPUT PEGAWAI
+   Diadaptasi dari index_input_pegawai.html -- data {jabatan:[], orang:[]}
+   disimpan ke repo GitHub terpisah (inputpegawai/data.json) lewat token
+   yang disimpan di localStorage browser (TIDAK pernah ditulis ke file ini).
+   Ini berfungsi sebagai daftar pegawai master/cadangan -- independen dari
+   sumber data Spreadsheet yang dipakai tombol Generate di 3 tab LAPKA.
+   ====================================================================== */
+const PG_REPO_OWNER = "catkaujungtimur";
+const PG_REPO_NAME = "inputpegawai";
+const PG_DATA_PATH = "data.json";
+const PG_LS_TOKEN_KEY = "inputpegawai_pat_v1";
+const PG_LS_DATA_KEY = "inputpegawai_localdata_v1";
+
+let pgState = { jabatan: ["PLR","PLR DIPO","SCHOWING","MASINIS","KONDEKTUR","PPKA"], orang: [] };
+let pgSha = null;
+let pgDirty = false;
+let pgInited = false;
+
+function pgEscapeHtml(s){ return escapeHtml(s); }
+function pgEscapeAttr(s){ return escapeAttr(s); }
+function pgToast(msg, type){ toast(msg, type); }
+function pgGetToken(){ return localStorage.getItem(PG_LS_TOKEN_KEY) || ""; }
+function pgSaveLocalData(){ try{ localStorage.setItem(PG_LS_DATA_KEY, JSON.stringify(pgState)); }catch(e){} }
+function pgLoadLocalData(){
+  try{
+    const raw = localStorage.getItem(PG_LS_DATA_KEY);
+    if(raw) pgState = JSON.parse(raw);
+  }catch(e){}
+}
+function pgMarkDirty(){ pgDirty = true; pgUpdateStatusBar(); }
+
+function pgUpdateStatusBar(){
+  const dot = document.getElementById("pgStatusDot");
+  const msg = document.getElementById("pgStatusMsg");
+  if(!dot || !msg) return;
+  const token = pgGetToken();
+  if(!token){
+    dot.className = "pg-status-dot";
+    msg.textContent = "Belum ada token GitHub -- data hanya tersimpan di browser ini sampai token diatur.";
+    return;
+  }
+  if(pgDirty){
+    dot.className = "pg-status-dot error";
+    msg.textContent = "Ada perubahan yang belum disimpan ke GitHub. Klik \"Simpan ke GitHub\" di bawah.";
+    return;
+  }
+  dot.className = "pg-status-dot connected";
+  msg.textContent = "Token tersedia. Data sinkron dengan GitHub.";
+}
+
+/* ---------------------------------------------------------------------
+   RENDER SHELL (sekali saja saat pertama kali tab dibuka)
+--------------------------------------------------------------------- */
+function pegawaiInitOnce(){
+  if(pgInited) return;
+  pgInited = true;
+  pgLoadLocalData();
+  pgRenderShell();
+  pgUpdateStatusBar();
+  pgLoadFromGithub();
+}
+
+function pgRenderShell(){
+  const panel = document.getElementById("panelPegawai");
+  panel.innerHTML = `
+    <div class="panel-wrap">
+      <div class="pg-wrap">
+
+        <div class="pg-status-bar" id="pgStatusBarEl">
+          <span class="pg-status-dot" id="pgStatusDot"></span>
+          <span class="pg-msg" id="pgStatusMsg">Memeriksa token tersimpan&hellip;</span>
+          <button class="pg-linklike" id="pgBtnTokenSettings" type="button">Atur token</button>
+        </div>
+
+        <div class="pg-card" id="pgTokenCard" style="display:none;">
+          <h2>Token GitHub</h2>
+          <p class="pg-hint">
+            Token disimpan di browser kamu sendiri (localStorage), tidak dikirim ke server manapun selain langsung ke GitHub.
+            Dibutuhkan supaya halaman ini bisa menyimpan perubahan ke repo <code>${PG_REPO_NAME}</code>.
+            Jangan pernah menempelkan token ke file ini atau ke tempat lain yang bisa dibaca orang lain.
+          </p>
+          <div class="pg-token-row">
+            <input type="password" id="pgInpToken" placeholder="github_pat_...">
+            <button id="pgBtnSaveToken" type="button">Simpan token</button>
+            <button id="pgBtnClearToken" type="button" class="pg-ghost">Hapus token</button>
+          </div>
+          <details class="help">
+            <summary>Cara membuat token</summary>
+            <div class="help-body">
+              1. GitHub &rarr; foto profil &rarr; <b>Settings</b> &rarr; <b>Developer settings</b> &rarr; <b>Personal access tokens</b> &rarr; <b>Fine-grained tokens</b> &rarr; <b>Generate new token</b>.<br>
+              2. <b>Repository access</b>: pilih <i>Only select repositories</i> &rarr; pilih repo <code>${PG_REPO_NAME}</code>.<br>
+              3. <b>Permissions</b> &rarr; <b>Repository permissions</b> &rarr; cari <b>Contents</b> &rarr; ubah ke <b>Read and write</b>.<br>
+              4. <b>Generate token</b>, lalu copy token-nya (hanya tampil sekali) dan paste di kolom atas.
+            </div>
+          </details>
+        </div>
+
+        <div class="pg-card">
+          <h2>Tambah Satu Data</h2>
+          <p class="pg-hint">Isi salah satu dulu (NIPP atau Nama), sisanya bisa menyusul &mdash; lalu lengkapi jabatan dan simpan.</p>
+          <div class="pg-form-grid">
+            <div>
+              <label class="pg-field-label">NIPP</label>
+              <input type="text" id="pgInpNipp" placeholder="contoh: 12345" inputmode="numeric">
+            </div>
+            <div>
+              <label class="pg-field-label">Nama</label>
+              <input type="text" id="pgInpNama" placeholder="contoh: PSEUDO EMPEROR" style="text-transform:uppercase;">
+            </div>
+            <div>
+              <label class="pg-field-label">Jabatan</label>
+              <div class="pg-jabatan-row">
+                <select id="pgInpJabatan"></select>
+                <button type="button" class="pg-ghost pg-small" id="pgBtnTambahJabatan" title="Tambah jabatan baru">+ Jabatan</button>
+              </div>
+            </div>
+            <div>
+              <button type="button" id="pgBtnTambahSatu">Tambah</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pg-card">
+          <h2>Input Massal</h2>
+          <p class="pg-hint">
+            Paste banyak baris sekaligus, format <b>NIPP</b>&nbsp;[tab/koma]&nbsp;<b>NAMA</b>&nbsp;[tab/koma]&nbsp;<b>JABATAN</b> per baris
+            (bisa langsung copy-paste dari Excel/Spreadsheet, atau pisahkan dengan koma). Baris pertama boleh berupa header (NIPP, NAMA, JABATAN) &mdash; akan otomatis dilewati.
+            Jabatan yang belum dikenal otomatis ditambahkan ke daftar jabatan.
+          </p>
+          <textarea id="pgInpMassal" rows="8" placeholder="NIPP&#9;NAMA&#9;JABATAN"></textarea>
+          <div class="pg-actions-row">
+            <button type="button" id="pgBtnProsesMassal">Proses &amp; Tambahkan</button>
+            <span class="pg-count-pill" id="pgMassalPreviewCount"></span>
+          </div>
+        </div>
+
+        <div class="pg-card">
+          <h2 class="pg-collapsible-head" id="pgDaftarDataHead">
+            <span class="pg-collapse-arrow" id="pgDaftarDataArrow">&#9656;</span> Daftar Data <span class="pg-count-pill" id="pgTotalCount"></span>
+          </h2>
+          <div id="pgDaftarDataBody" style="display:none;">
+            <div class="pg-search-row">
+              <input type="text" id="pgFilterText" placeholder="Cari nama atau NIPP...">
+              <select id="pgFilterJabatan"><option value="">Semua jabatan</option></select>
+            </div>
+            <div id="pgTableWrap"></div>
+            <div class="pg-actions-row">
+              <button type="button" class="pg-danger pg-ghost" id="pgBtnHapusSemua">Hapus semua data</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pg-card">
+          <h2>Export / Import (cadangan pribadi)</h2>
+          <p class="pg-hint">
+            Simpan salinan data ke file di perangkatmu sebagai jaring pengaman pribadi &mdash; berguna kalau suatu saat
+            data di GitHub perlu dipulihkan. Ini terpisah dari "Simpan ke GitHub" di bawah; export/import TIDAK otomatis
+            mengirim apapun ke GitHub.
+          </p>
+          <div class="pg-actions-row">
+            <button type="button" id="pgBtnExport" class="pg-ghost">Export ke file JSON</button>
+            <button type="button" id="pgBtnImportTrigger" class="pg-ghost">Import dari file JSON</button>
+            <input type="file" id="pgFileImport" accept=".json" style="display:none;">
+          </div>
+        </div>
+
+        <div class="pg-card">
+          <h2>Simpan ke GitHub</h2>
+          <p class="pg-hint">Perubahan di atas baru tersimpan di browser ini. Klik tombol di bawah untuk mengirim (commit) ke repo <code>${PG_REPO_NAME}</code>.</p>
+          <div class="pg-actions-row">
+            <button type="button" id="pgBtnSimpanGithub" class="pg-success">Simpan ke GitHub</button>
+            <button type="button" id="pgBtnMuatUlang" class="pg-ghost">Muat ulang dari GitHub</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  `;
+
+  pgRenderJabatanOptions();
+  pgRenderTable();
+  pgWireEvents();
+}
+
+/* ---------------------------------------------------------------------
+   JABATAN
+--------------------------------------------------------------------- */
+function pgRenderJabatanOptions(){
+  const sel = document.getElementById("pgInpJabatan");
+  const prev = sel.value;
+  sel.innerHTML = pgState.jabatan.map(j=>`<option value="${pgEscapeAttr(j)}">${pgEscapeHtml(j)}</option>`).join("");
+  if(pgState.jabatan.includes(prev)) sel.value = prev;
+
+  const filterSel = document.getElementById("pgFilterJabatan");
+  const prevFilter = filterSel.value;
+  filterSel.innerHTML = `<option value="">Semua jabatan</option>` +
+    pgState.jabatan.map(j=>`<option value="${pgEscapeAttr(j)}">${pgEscapeHtml(j)}</option>`).join("");
+  filterSel.value = prevFilter;
+}
+
+/* ---------------------------------------------------------------------
+   INPUT MASSAL
+--------------------------------------------------------------------- */
+function pgParseMassalLine(line){
+  let parts = line.split("\t").map(s=>s.trim());
+  if(parts.length < 3) parts = line.split(",").map(s=>s.trim());
+  if(parts.length < 3) return null;
+  const [nipp, nama, jabatan] = parts;
+  if(!nipp && !nama) return null;
+  return { nipp: nipp.trim(), nama: nama.trim().toUpperCase(), jabatan: jabatan.trim().toUpperCase() };
+}
+function pgIsHeaderLine(parsed){
+  const s = (parsed.nipp + parsed.nama + parsed.jabatan).toUpperCase();
+  return s.includes("NIPP") && s.includes("NAMA");
+}
+
+/* ---------------------------------------------------------------------
+   TABEL
+--------------------------------------------------------------------- */
+function pgRenderTable(){
+  const wrap = document.getElementById("pgTableWrap");
+  if(!wrap) return;
+  const filterText = document.getElementById("pgFilterText").value.trim().toUpperCase();
+  const filterJabatan = document.getElementById("pgFilterJabatan").value;
+
+  const rows = pgState.orang
+    .map((o, idx)=>({ ...o, idx }))
+    .filter(o=>{
+      if(filterJabatan && o.jabatan !== filterJabatan) return false;
+      if(filterText){
+        const hay = (o.nipp + " " + o.nama).toUpperCase();
+        if(!hay.includes(filterText)) return false;
+      }
+      return true;
+    })
+    .sort((a,b)=> a.nama.localeCompare(b.nama));
+
+  document.getElementById("pgTotalCount").textContent = `(${pgState.orang.length} total)`;
+
+  if(rows.length === 0){
+    wrap.innerHTML = `<div class="pg-empty-state">Belum ada data yang cocok. Tambahkan lewat form di atas.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = `
+    <table class="pg-data">
+      <thead><tr><th style="width:110px;">NIPP</th><th>Nama</th><th style="width:140px;">Jabatan</th><th style="width:90px;"></th></tr></thead>
+      <tbody>
+        ${rows.map(o => `
+          <tr data-idx="${o.idx}">
+            <td class="pg-nipp">${pgEscapeHtml(o.nipp) || "<span style='color:var(--muted)'>&mdash;</span>"}</td>
+            <td>${pgEscapeHtml(o.nama) || "<span style='color:var(--muted)'>&mdash;</span>"}</td>
+            <td><span class="pg-badge">${pgEscapeHtml(o.jabatan)}</span></td>
+            <td class="pg-col-actions">
+              <button class="pg-ghost pg-small" data-pgaction="edit" data-idx="${o.idx}">Edit</button>
+              <button class="pg-danger pg-ghost pg-small" data-pgaction="del" data-idx="${o.idx}">Hapus</button>
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+/* ---------------------------------------------------------------------
+   EVENTS (dipasang sekali saat shell pertama kali dirender)
+--------------------------------------------------------------------- */
+function pgWireEvents(){
+  document.getElementById("pgBtnTokenSettings").addEventListener("click", ()=>{
+    const card = document.getElementById("pgTokenCard");
+    card.style.display = card.style.display === "none" ? "block" : "none";
+  });
+  document.getElementById("pgBtnSaveToken").addEventListener("click", ()=>{
+    const v = document.getElementById("pgInpToken").value.trim();
+    if(!v){ pgToast("Token kosong, tidak disimpan.", "error"); return; }
+    localStorage.setItem(PG_LS_TOKEN_KEY, v);
+    document.getElementById("pgInpToken").value = "";
+    pgToast("Token disimpan di browser ini.", "success");
+    pgUpdateStatusBar();
+    pgLoadFromGithub();
+  });
+  document.getElementById("pgBtnClearToken").addEventListener("click", ()=>{
+    localStorage.removeItem(PG_LS_TOKEN_KEY);
+    pgToast("Token dihapus.");
+    pgUpdateStatusBar();
+  });
+
+  document.getElementById("pgBtnTambahJabatan").addEventListener("click", ()=>{
+    const nama = prompt("Nama jabatan baru:");
+    if(!nama) return;
+    const trimmed = nama.trim().toUpperCase();
+    if(!trimmed) return;
+    if(pgState.jabatan.includes(trimmed)){ pgToast("Jabatan itu sudah ada."); return; }
+    pgState.jabatan.push(trimmed);
+    pgRenderJabatanOptions();
+    document.getElementById("pgInpJabatan").value = trimmed;
+    pgSaveLocalData();
+    pgMarkDirty();
+    pgToast(`Jabatan "${trimmed}" ditambahkan.`, "success");
+  });
+
+  document.getElementById("pgBtnTambahSatu").addEventListener("click", ()=>{
+    const nipp = document.getElementById("pgInpNipp").value.trim();
+    const nama = document.getElementById("pgInpNama").value.trim().toUpperCase();
+    const jabatan = document.getElementById("pgInpJabatan").value;
+    if(!nipp && !nama){ pgToast("Isi NIPP atau Nama dulu.", "error"); return; }
+    if(!jabatan){ pgToast("Pilih jabatan dulu.", "error"); return; }
+
+    const dup = pgState.orang.find(o => (nipp && o.nipp === nipp));
+    if(dup){
+      if(!confirm(`NIPP ${nipp} sudah terdaftar atas nama ${dup.nama} (${dup.jabatan}). Timpa data ini?`)) return;
+      dup.nama = nama || dup.nama;
+      dup.jabatan = jabatan;
+    } else {
+      pgState.orang.push({ nipp, nama, jabatan });
+    }
+    document.getElementById("pgInpNipp").value = "";
+    document.getElementById("pgInpNama").value = "";
+    pgSaveLocalData();
+    pgMarkDirty();
+    pgRenderTable();
+    pgToast("Ditambahkan.", "success");
+  });
+
+  document.getElementById("pgInpMassal").addEventListener("input", ()=>{
+    const lines = document.getElementById("pgInpMassal").value.split("\n").map(l=>l.trim()).filter(l=>l.length>0);
+    document.getElementById("pgMassalPreviewCount").textContent = lines.length > 0 ? `${lines.length} baris terdeteksi` : "";
+  });
+  document.getElementById("pgBtnProsesMassal").addEventListener("click", ()=>{
+    const raw = document.getElementById("pgInpMassal").value;
+    const lines = raw.split("\n").map(l=>l.trim()).filter(l=>l.length>0);
+    if(lines.length === 0){ pgToast("Tidak ada baris untuk diproses.", "error"); return; }
+
+    let added = 0, updated = 0, skipped = 0, jabatanBaru = [];
+    lines.forEach((line, idx)=>{
+      const parsed = pgParseMassalLine(line);
+      if(!parsed){ skipped++; return; }
+      if(idx === 0 && pgIsHeaderLine(parsed)){ return; }
+      if(!parsed.nipp && !parsed.nama){ skipped++; return; }
+
+      if(parsed.jabatan && !pgState.jabatan.includes(parsed.jabatan)){
+        pgState.jabatan.push(parsed.jabatan);
+        jabatanBaru.push(parsed.jabatan);
+      }
+
+      const existing = parsed.nipp ? pgState.orang.find(o => o.nipp === parsed.nipp) : null;
+      if(existing){
+        existing.nama = parsed.nama || existing.nama;
+        existing.jabatan = parsed.jabatan || existing.jabatan;
+        updated++;
+      } else {
+        pgState.orang.push(parsed);
+        added++;
+      }
+    });
+
+    pgRenderJabatanOptions();
+    pgRenderTable();
+    pgSaveLocalData();
+    pgMarkDirty();
+    document.getElementById("pgInpMassal").value = "";
+    document.getElementById("pgMassalPreviewCount").textContent = "";
+
+    let msg = `${added} data ditambahkan, ${updated} diperbarui`;
+    if(skipped) msg += `, ${skipped} baris dilewati (format tidak dikenali)`;
+    if(jabatanBaru.length) msg += `. Jabatan baru: ${jabatanBaru.join(", ")}`;
+    pgToast(msg, "success");
+  });
+
+  document.getElementById("pgFilterText").addEventListener("input", pgRenderTable);
+  document.getElementById("pgFilterJabatan").addEventListener("change", pgRenderTable);
+
+  document.getElementById("pgTableWrap").addEventListener("click", e=>{
+    const btn = e.target.closest("button[data-pgaction]");
+    if(!btn) return;
+    const idx = parseInt(btn.dataset.idx, 10);
+    const o = pgState.orang[idx];
+    if(!o) return;
+
+    if(btn.dataset.pgaction === "del"){
+      if(!confirm(`Hapus data ${o.nama || o.nipp}?`)) return;
+      pgState.orang.splice(idx, 1);
+      pgSaveLocalData();
+      pgMarkDirty();
+      pgRenderTable();
+      pgToast("Data dihapus.");
+      return;
+    }
+
+    if(btn.dataset.pgaction === "edit"){
+      const newNipp = prompt("NIPP:", o.nipp) ?? o.nipp;
+      const newNama = (prompt("Nama:", o.nama) ?? o.nama).toUpperCase();
+      const newJabatan = (prompt(`Jabatan (${pgState.jabatan.join(", ")}):`, o.jabatan) ?? o.jabatan).toUpperCase();
+      o.nipp = newNipp.trim();
+      o.nama = newNama.trim();
+      o.jabatan = newJabatan.trim();
+      if(o.jabatan && !pgState.jabatan.includes(o.jabatan)){
+        pgState.jabatan.push(o.jabatan);
+        pgRenderJabatanOptions();
+      }
+      pgSaveLocalData();
+      pgMarkDirty();
+      pgRenderTable();
+      pgToast("Data diperbarui.", "success");
+    }
+  });
+
+  document.getElementById("pgBtnHapusSemua").addEventListener("click", ()=>{
+    if(pgState.orang.length === 0) return;
+    if(!confirm(`Hapus SEMUA ${pgState.orang.length} data? Tindakan ini tidak bisa dibatalkan kecuali kamu belum menyimpan ke GitHub.`)) return;
+    pgState.orang = [];
+    pgSaveLocalData();
+    pgMarkDirty();
+    pgRenderTable();
+    pgToast("Semua data dihapus dari tampilan lokal.");
+  });
+
+  document.getElementById("pgDaftarDataHead").addEventListener("click", ()=>{
+    const body = document.getElementById("pgDaftarDataBody");
+    const arrow = document.getElementById("pgDaftarDataArrow");
+    const isOpen = body.style.display !== "none";
+    body.style.display = isOpen ? "none" : "block";
+    arrow.innerHTML = isOpen ? "&#9656;" : "&#9662;";
+  });
+
+  document.getElementById("pgBtnExport").addEventListener("click", pgExportToFile);
+  document.getElementById("pgBtnImportTrigger").addEventListener("click", ()=>{
+    document.getElementById("pgFileImport").click();
+  });
+  document.getElementById("pgFileImport").addEventListener("change", (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    pgImportFromFile(file);
+    e.target.value = "";
+  });
+
+  document.getElementById("pgBtnSimpanGithub").addEventListener("click", pgSaveToGithub);
+  document.getElementById("pgBtnMuatUlang").addEventListener("click", ()=>{
+    if(pgDirty && !confirm("Ada perubahan lokal yang belum disimpan ke GitHub. Muat ulang akan menimpa perubahan itu. Lanjutkan?")) return;
+    pgLoadFromGithub();
+  });
+}
+
+/* ---------------------------------------------------------------------
+   EXPORT / IMPORT JSON (cadangan pribadi)
+--------------------------------------------------------------------- */
+function pgExportToFile(){
+  const blob = new Blob([JSON.stringify(pgState, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  a.href = url;
+  a.download = `data-pegawai_${dateStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  pgToast("File JSON diunduh.", "success");
+}
+function pgImportFromFile(file){
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    try{
+      const parsed = JSON.parse(ev.target.result);
+      if(!parsed || !Array.isArray(parsed.orang)){ throw new Error("format tidak sesuai (tidak ada 'orang')"); }
+      if(!confirm(`Import akan MENGGANTI seluruh data yang sedang tampil (${pgState.orang.length} data) dengan isi file ini (${parsed.orang.length} data). Perubahan ini belum tersimpan ke GitHub sampai kamu klik "Simpan ke GitHub". Lanjutkan?`)) return;
+      pgState = {
+        jabatan: Array.isArray(parsed.jabatan) && parsed.jabatan.length ? parsed.jabatan : ["PLR","PLR DIPO","SCHOWING","MASINIS","KONDEKTUR","PPKA"],
+        orang: parsed.orang
+      };
+      pgSaveLocalData();
+      pgRenderJabatanOptions();
+      pgRenderTable();
+      pgMarkDirty();
+      pgToast(`${parsed.orang.length} data berhasil di-import dari file. Klik "Simpan ke GitHub" untuk menyimpannya secara permanen.`, "success");
+    }catch(err){
+      pgToast("Gagal membaca file JSON: " + err.message, "error");
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ---------------------------------------------------------------------
+   GITHUB API
+--------------------------------------------------------------------- */
+async function pgLoadFromGithub(){
+  const token = pgGetToken();
+  const url = `https://api.github.com/repos/${PG_REPO_OWNER}/${PG_REPO_NAME}/contents/${PG_DATA_PATH}`;
+  try{
+    const res = await fetch(url, {
+      headers: token ? { "Authorization": `Bearer ${token}`, "Accept":"application/vnd.github+json" } : { "Accept":"application/vnd.github+json" }
+    });
+    if(res.status === 404){
+      pgToast("data.json belum ada di repo -- akan dibuat saat pertama kali Simpan ke GitHub.", "");
+      pgSha = null;
+      return;
+    }
+    if(!res.ok){
+      pgToast(`Gagal memuat dari GitHub (${res.status}). Memakai data lokal.`, "error");
+      return;
+    }
+    const json = await res.json();
+    pgSha = json.sha;
+    const content = decodeURIComponent(escape(atob(json.content)));
+    const parsed = JSON.parse(content);
+    if(parsed && Array.isArray(parsed.orang)){
+      pgState = parsed;
+      pgDirty = false;
+      pgSaveLocalData();
+      pgRenderJabatanOptions();
+      pgRenderTable();
+      pgUpdateStatusBar();
+      pgToast("Data dimuat dari GitHub.", "success");
+    }
+  }catch(e){
+    pgToast("Gagal terhubung ke GitHub. Memakai data lokal (browser ini).", "error");
+  }
+}
+
+async function pgSaveToGithub(){
+  const token = pgGetToken();
+  if(!token){
+    pgToast("Belum ada token GitHub. Klik \"Atur token\" dulu.", "error");
+    document.getElementById("pgTokenCard").style.display = "block";
+    return;
+  }
+  const btn = document.getElementById("pgBtnSimpanGithub");
+  btn.disabled = true;
+  btn.textContent = "Menyimpan...";
+  try{
+    const url = `https://api.github.com/repos/${PG_REPO_OWNER}/${PG_REPO_NAME}/contents/${PG_DATA_PATH}`;
+    const body = {
+      message: `Update data pegawai (${new Date().toISOString()})`,
+      content: btoa(unescape(encodeURIComponent(JSON.stringify(pgState, null, 2)))),
+    };
+    if(pgSha) body.sha = pgSha;
+
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+
+    if(!res.ok){
+      const errJson = await res.json().catch(()=>({}));
+      throw new Error(errJson.message || `HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    pgSha = json.content ? json.content.sha : pgSha;
+    pgDirty = false;
+    pgUpdateStatusBar();
+    pgToast("Tersimpan ke GitHub.", "success");
+  }catch(e){
+    pgToast("Gagal menyimpan ke GitHub: " + e.message, "error");
+  }finally{
+    btn.disabled = false;
+    btn.textContent = "Simpan ke GitHub";
+  }
 }
 
 /* ======================================================================
