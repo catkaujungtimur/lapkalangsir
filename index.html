@@ -253,6 +253,98 @@
     table.main-table{ font-size:10.5px; }
     .sign-section{ flex-direction:column; }
   }
+
+  /* ===================== TAB: INPUT PEGAWAI ===================== */
+  .pg-wrap{ max-width:980px; margin:0 auto; }
+  .pg-wrap code{ background:var(--panel); padding:1px 5px; border-radius:3px; font-family:var(--mono); }
+
+  .pg-status-bar{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    border:1px solid var(--border); border-radius:6px; padding:10px 14px; margin-bottom:18px;
+    font-size:12.5px; background:#fff;
+  }
+  .pg-status-dot{ width:8px; height:8px; border-radius:50%; background:var(--muted); flex-shrink:0; }
+  .pg-status-dot.connected{ background:var(--ok); }
+  .pg-status-dot.error{ background:var(--accent); }
+  .pg-status-bar .pg-msg{ flex:1; min-width:200px; }
+  .pg-linklike{
+    background:none; border:none; color:var(--accent); text-decoration:underline;
+    cursor:pointer; font-size:12.5px; padding:0; font-family:inherit;
+  }
+
+  .pg-card{
+    background:#fff; border:1px solid var(--border); border-radius:8px;
+    padding:18px 20px; margin-bottom:18px;
+  }
+  .pg-card h2{
+    font-size:14px; font-weight:700; margin:0 0 4px; text-transform:uppercase;
+    letter-spacing:.04em; color:var(--accent);
+  }
+  .pg-collapsible-head{ cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px; }
+  .pg-collapsible-head:hover{ opacity:.8; }
+  .pg-collapse-arrow{ display:inline-block; font-size:11px; width:12px; }
+  .pg-card .pg-hint{ color:var(--muted); font-size:12px; margin:0 0 14px; line-height:1.5; }
+
+  .pg-token-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .pg-token-row input{ flex:1; min-width:220px; }
+
+  .pg-field-label{ display:block; font-size:11.5px; color:var(--muted); margin-bottom:4px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
+
+  .pg-wrap input[type="text"], .pg-wrap input[type="password"], .pg-wrap select, .pg-wrap textarea{
+    width:100%; border:1px solid var(--border); border-radius:5px; padding:8px 10px;
+    font-size:13.5px; font-family:var(--sans); background:var(--panel); color:var(--ink);
+  }
+  .pg-wrap input:focus, .pg-wrap select:focus, .pg-wrap textarea:focus{ outline:none; border-color:var(--accent); background:#fff; }
+  .pg-wrap textarea{ font-family:var(--mono); font-size:12.5px; line-height:1.5; resize:vertical; }
+
+  .pg-form-grid{ display:grid; grid-template-columns: 140px 1fr 200px auto; gap:10px; align-items:end; }
+  @media (max-width:720px){ .pg-form-grid{ grid-template-columns: 1fr 1fr; } }
+
+  .pg-jabatan-row{ display:flex; gap:6px; }
+  .pg-jabatan-row select{ flex:1; }
+
+  .pg-wrap button{
+    font-family:var(--sans); font-size:13px; font-weight:600; cursor:pointer;
+    border-radius:5px; border:1px solid var(--ink); background:var(--ink); color:#fff;
+    padding:8px 14px; line-height:1.2; transition:opacity .15s;
+  }
+  .pg-wrap button:hover{ opacity:.85; }
+  .pg-wrap button:disabled{ opacity:.4; cursor:not-allowed; }
+  .pg-wrap button.pg-ghost{ background:transparent; color:var(--ink); border:1px solid var(--border); }
+  .pg-wrap button.pg-danger{ background:var(--accent); border-color:var(--accent); }
+  .pg-wrap button.pg-success{ background:var(--ok); border-color:var(--ok); }
+  .pg-wrap button.pg-small{ padding:5px 9px; font-size:11.5px; }
+
+  .pg-actions-row{ display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
+
+  table.pg-data{ width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  table.pg-data th, table.pg-data td{ border-bottom:1px solid var(--border); padding:7px 8px; text-align:left; }
+  table.pg-data th{ font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); font-weight:600; border-bottom:2px solid var(--ink); }
+  table.pg-data td.pg-nipp{ font-family:var(--mono); white-space:nowrap; }
+  table.pg-data tr:hover td{ background:var(--accent-soft); }
+  table.pg-data td.pg-col-actions{ text-align:right; white-space:nowrap; }
+
+  .pg-empty-state{ color:var(--muted); font-size:13px; text-align:center; padding:30px 0; }
+
+  .pg-badge{
+    display:inline-block; font-size:10.5px; font-weight:700; padding:2px 7px;
+    border-radius:10px; background:var(--accent-soft); color:var(--accent);
+    font-family:var(--mono); letter-spacing:.02em;
+  }
+
+  .pg-count-pill{ font-family:var(--mono); color:var(--muted); font-size:12px; }
+
+  .pg-search-row{ display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .pg-search-row input{ flex:1; min-width:160px; }
+  .pg-search-row select{ width:auto; min-width:140px; }
+
+  .pg-card details.help summary{ cursor:pointer; font-size:12.5px; color:var(--accent); font-weight:600; }
+  .pg-card details.help{ margin-top:10px; }
+  .pg-card details.help .help-body{ font-size:12px; color:var(--muted); line-height:1.6; margin-top:8px; }
+
+  @media print{
+    .pg-wrap{ display:none !important; }
+  }
 </style>
 </head>
 <body>
@@ -267,14 +359,7 @@
   <div id="panelMalam" class="tab-panel"></div>
   <div id="panelSiang" class="tab-panel"></div>
   <div id="panelPagi" class="tab-panel"></div>
-  <div id="panelPegawai" class="tab-panel">
-    <div class="panel-wrap">
-      <div class="config-card">
-        <h2>Input Pegawai</h2>
-        <p class="hint">Tab ini akan digabungkan belakangan dari <code>index_input_pegawai.html</code>.</p>
-      </div>
-    </div>
-  </div>
+  <div id="panelPegawai" class="tab-panel"></div>
 
 </div>
 
